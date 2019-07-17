@@ -16,9 +16,9 @@ param (
 
 
 
-function process-File ([string] $sourceFile, [long] $filesize, [bool]$includeHeader)
+function process-File ([string] $sourceFile, [long] $fileLimit, [bool]$includeHeader)
 {
-    $file = get-childitem -File $sourceFile
+    $file = get-childitem -Path $sourceFile #updated for Powershell 2.0 compatability
     $path = $file.DirectoryName
     $basename = $file.BaseName
     $extension = $file.Extension
@@ -28,37 +28,57 @@ function process-File ([string] $sourceFile, [long] $filesize, [bool]$includeHea
 
     # Read in source file and grab header row.
     $inData = New-Object -TypeName System.IO.StreamReader -ArgumentList $sourceFile
+    
     $header = $inData.ReadLine()
 
+    try
+    {
     # Create initial output object
-    $outData = New-Object -TypeName System.Text.StringBuilder
+    $fileSize = 0
+    $i = 0
+    $outData = New-Object -TypeName System.IO.StreamWriter -ArgumentList ( $SplitPath -f $basename, $i, $extension )
     if ($includeHeader)
     {
         [void]$outData.Append("$header`r`n")
+        $fileSize = $outData.Length
     }
 
-    $i = 0
+    
 
-    while( $line = $inData.ReadLine() ){
-        # If the object is longer than 600MB then output the content of the object and create a new one.
-        if( ($outData.Length + $line.Length) -gt $filesize )
+    while( $line = $inData.ReadLine() )
+    {
+        #write output and keep track of size
+        #if size + new info is greater than limit, create new file with header optional. 
+        if( ($filesize + $line.Length) -gt $fileLimit )
         {
-            $outData.ToString() | Out-File -FilePath ( $SplitPath -f $basename, $i, $extension ) -Encoding ascii
-        
-            $outData = New-Object -TypeName System.Text.StringBuilder
+            #update file number being used
+            $i++
+            #Create new file to use
+            $outData.Close()
+            $outData = New-Object -TypeName System.IO.StreamWriter -ArgumentList ( $SplitPath -f $basename, $i, $extension )
+            #Reset File Size counter
+            $fileSize = 0
             if ($includeHeader)
             {
                 [void]$outData.Append("$header`r`n")
+                $fileSize = $outData.Length
             }
-
-            $i++
+            
+            
         }
     
         Write-Verbose "$currentFile, $line"
-    
-        #[void]$outData.Append("`r`n$($line)")
-        [void]$outData.Append("$($line)`r`n")
-        }
+        [void]$outData.WriteLine("$line")
+        $filesize += $line.Length
+        #write-host $filesize
+        #$outData.ToString() | Out-File -FilePath ( $SplitPath -f $basename, $i, $extension ) -Encoding ascii -Append
+        
+    }
+    }
+    finally
+    {
+        $outData.Close()
+    }
 
     # Write contents of final object 
     $outData.ToString() | Out-File -FilePath ( $SplitPath -f $basename, $i, $extension ) -Encoding ascii
@@ -77,7 +97,7 @@ if (Test-Path -Path $folderPath) #check to make sure the path exists
     foreach ($f in $FileList)
     {
         $fullname = $f.fullname
-        process-File -sourceFile $fullname -filesize $filesize -includeHeader $false
+        process-File -sourceFile $fullname -fileLimit $filesize -includeHeader $false
         if($deleteFile)
         {
             Remove-Item -Path $fullname
